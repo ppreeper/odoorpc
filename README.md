@@ -1,0 +1,2 @@
+# odoorpc
+Odoo RPC Library
