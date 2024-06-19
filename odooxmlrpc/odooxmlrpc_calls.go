@@ -109,7 +109,6 @@ func (o *OdooXML) Load(model string, header []string, values [][]any) (ids []int
 // domain = [[["name", "=", "ZExample1"]]]
 // limit = 1
 func (o *OdooXML) Count(model string, filters ...any) (count int, err error) {
-	fmt.Println("Count", model, filters)
 	if err := o.models.Call("execute", []any{
 		o.database, o.uid, o.password,
 		model, "search_count", filter.FilterList(filters...),

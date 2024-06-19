@@ -20,9 +20,6 @@ func NewRequest(url string, method string, args interface{}) (*http.Request, err
 		return nil, err
 	}
 
-	fmt.Println("url", url)
-	fmt.Println("body", string(body))
-
 	request, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err

@@ -35,7 +35,6 @@ var searchDomainPatterns = []struct {
 
 func TestSearchDomain(t *testing.T) {
 	for i, pattern := range searchDomainPatterns {
-		// fmt.Println("test: domain:", pattern.domain, "pattern.err:", pattern.err)
 		args, err := SearchDomain(pattern.domain)
 		if !reflect.DeepEqual(pattern.args, args) {
 			t.Errorf("\n[%d]: expected reflect args: %v, got %v", i, pattern.args, args)

@@ -52,9 +52,6 @@ func encodeClientRequest(service, method string, args any) ([]byte, error) {
 		Params:  params{Service: service, Method: method, Args: args},
 	}
 
-	rr, _ := json.Marshal(req)
-	fmt.Println(string(rr))
-
 	return json.Marshal(req)
 }
 
@@ -91,71 +88,3 @@ func (o *OdooJSON) Call(service string, method string, args ...any) (res any, er
 	}
 	return res, nil
 }
-
-// Call sends a request
-// func (o *Odoo) Call(service string, method string, args ...any) (res any, err error) {
-// 	params := map[string]any{
-// 		"service": service,
-// 		"method":  method,
-// 		"args":    args,
-// 	}
-// 	res, err = o.JSONRPC(params)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return res, nil
-// }
-
-// JSONRPC json request
-// func (o *Odoo) JSONRPC(params map[string]any) (res any, err error) {
-// 	message := map[string]any{
-// 		"jsonrpc": "2.0",
-// 		"method":  "call",
-// 		"id":      rand.Intn(100000000),
-// 		"params":  params,
-// 	}
-
-// 	bytesRepresentation, err := json.Marshal(message)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("json marshall error: %w", err)
-// 	}
-// 	fmt.Println(string(bytesRepresentation))
-
-// 	// TODO: refactor timeout
-// 	client := &http.Client{
-// 		Timeout: 5 * time.Second,
-// 	}
-
-// 	// TODO: refactor insecure skip verify
-// 	if o.schema == "https" && (o.hostname == "localhost" || strings.HasSuffix(o.hostname, ".local")) {
-// 		transCfg := &http.Transport{}
-// 		transCfg.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-// 		client.Transport = transCfg
-// 	}
-
-// 	resp, err := client.Post(o.url, "application/json", bytes.NewBuffer(bytesRepresentation))
-// 	if err != nil {
-// 		return nil, fmt.Errorf("http post error: %w", err)
-// 	}
-
-// 	var result map[string]any
-// 	if resp != nil {
-// 		json.NewDecoder(resp.Body).Decode(&result)
-// 	} else {
-// 		return nil, fmt.Errorf("no response returned")
-// 	}
-
-// 	if _, ok := result["error"]; ok {
-// 		resultError := ""
-// 		if errorMessage, ok := result["error"].(map[string]any)["message"].(string); ok {
-// 			resultError += errorMessage
-// 		}
-// 		if dataMessage, ok := result["error"].(map[string]any)["data"].(map[string]any)["message"].(string); ok {
-// 			resultError += ": " + dataMessage
-// 		}
-// 		return nil, fmt.Errorf(resultError)
-// 	}
-
-// 	res = result["result"]
-// 	return res, nil
-// }
