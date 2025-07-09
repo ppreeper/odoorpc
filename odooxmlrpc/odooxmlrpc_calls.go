@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ppreeper/odoorpc/filter"
+	"github.com/ppreeper/odoosearchdomain"
 	"github.com/ppreeper/odoorpc/xmlrpc"
 )
 
@@ -108,10 +108,10 @@ func (o *OdooXML) Load(model string, header []string, values [][]any) (ids []int
 //
 // domain = [[["name", "=", "ZExample1"]]]
 // limit = 1
-func (o *OdooXML) Count(model string, filters ...any) (count int, err error) {
+func (o *OdooXML) Count(model string, domains ...any) (count int, err error) {
 	if err := o.models.Call("execute", []any{
 		o.database, o.uid, o.password,
-		model, "search_count", filter.FilterList(filters...),
+		model, "search_count", odoosearchdomain.DomainList(domains...),
 	}, &count); err != nil {
 		return -1, fmt.Errorf("count failed: %w", err)
 	}
@@ -141,12 +141,12 @@ func (o *OdooXML) FieldsGet(model string, fields []string, fieldAttributes ...st
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooXML) GetID(model string, filters ...any) (id int, err error) {
+func (o *OdooXML) GetID(model string, domains ...any) (id int, err error) {
 	var ids []int
 	if err := o.models.Call("execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search",
-		filters,
+		domains,
 		map[string]any{"limit": 1},
 	}, &ids); err != nil {
 		return -1, fmt.Errorf("get_id failed: %w", err)
@@ -163,11 +163,11 @@ func (o *OdooXML) GetID(model string, filters ...any) (id int, err error) {
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooXML) Search(model string, filters ...any) (ids []int, err error) {
+func (o *OdooXML) Search(model string, domains ...any) (ids []int, err error) {
 	if err := o.models.Call("execute", []any{
 		o.database, o.uid, o.password,
 		model, "search",
-		filter.FilterList(filters...),
+		odoosearchdomain.DomainList(domains...),
 	}, &ids); err != nil {
 		return []int{}, fmt.Errorf("search failed: %w", err)
 	}
@@ -185,7 +185,7 @@ func (o *OdooXML) Search(model string, filters ...any) (ids []int, err error) {
 func (o *OdooXML) Read(model string, ids []int, fields ...string) (records []map[string]any, err error) {
 	if err := o.models.Call("execute", []any{
 		o.database, o.uid, o.password,
-		model, "read", ids, filter.FilterString(fields...),
+		model, "read", ids, odoosearchdomain.DomainString(fields...),
 	}, &records); err != nil {
 		return records, fmt.Errorf("read failed: %w", err)
 	}
@@ -204,7 +204,7 @@ func (o *OdooXML) Read(model string, ids []int, fields ...string) (records []map
 // offset = 0
 // limit = 1
 // fields = ["name", "email"]
-func (o *OdooXML) SearchRead(model string, offset int, limit int, fields []string, filters ...any) (records []map[string]any, err error) {
+func (o *OdooXML) SearchRead(model string, offset int, limit int, fields []string, domains ...any) (records []map[string]any, err error) {
 	options := make(map[string]any)
 	if offset > 0 {
 		options["offset"] = offset
@@ -213,13 +213,13 @@ func (o *OdooXML) SearchRead(model string, offset int, limit int, fields []strin
 		options["limit"] = limit
 	}
 	if len(fields) > 0 {
-		options["fields"] = filter.FilterString(fields...)
+		options["fields"] = odoosearchdomain.DomainString(fields...)
 	}
 
 	if err := o.models.Call("execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search_read",
-		filters,
+		domains,
 		options,
 	}, &records); err != nil {
 		return records, err

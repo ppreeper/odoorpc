@@ -10,14 +10,6 @@ import (
 	"net/http"
 )
 
-// func filterList(filters ...[]any) []any {
-// 	filter := []any{}
-// 	for _, f := range filters {
-// 		filter = append(filter, f)
-// 	}
-// 	return filter
-// }
-
 // ----------------------------------------------------------------------------
 // Request and Response
 // ----------------------------------------------------------------------------

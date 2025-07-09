@@ -3,7 +3,7 @@ package odoojrpc
 import (
 	"fmt"
 
-	"github.com/ppreeper/odoorpc/filter"
+	"github.com/ppreeper/odoosearchdomain"
 )
 
 // Login
@@ -104,10 +104,10 @@ func (o *OdooJSON) Load(model string, header []string, values [][]any) (ids []in
 //
 // domain = [[["name", "=", "ZExample1"]]]
 // limit = 1
-func (o *OdooJSON) Count(model string, filters ...any) (count int, err error) {
+func (o *OdooJSON) Count(model string, domains ...any) (count int, err error) {
 	v, err := o.Call("object", "execute",
 		o.database, o.uid, o.password,
-		model, "search_count", filter.FilterList(filters...),
+		model, "search_count", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
 		return count, err
@@ -132,7 +132,7 @@ func (o *OdooJSON) FieldsGet(model string, fields []string, fieldAttributes ...s
 	if len(fieldAttributes) == 0 {
 		v, err = o.Call("object", "execute",
 			o.database, o.uid, o.password,
-			model, "fields_get", filter.FilterString(fields...),
+			model, "fields_get", odoosearchdomain.DomainString(fields...),
 		)
 		if err != nil {
 			return recordFields, fmt.Errorf("fields_get failed")
@@ -140,8 +140,8 @@ func (o *OdooJSON) FieldsGet(model string, fields []string, fieldAttributes ...s
 	} else {
 		v, err = o.Call("object", "execute",
 			o.database, o.uid, o.password,
-			model, "fields_get", filter.FilterString(fields...),
-			filter.FilterString(fieldAttributes...),
+			model, "fields_get", odoosearchdomain.DomainString(fields...),
+			odoosearchdomain.DomainString(fieldAttributes...),
 		)
 		if err != nil {
 			return recordFields, fmt.Errorf("fields_get failed")
@@ -160,11 +160,11 @@ func (o *OdooJSON) FieldsGet(model string, fields []string, fieldAttributes ...s
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooJSON) GetID(model string, filters ...any) (id int, err error) {
+func (o *OdooJSON) GetID(model string, domains ...any) (id int, err error) {
 	id = -1
 	v, err := o.Call("object", "execute",
 		o.database, o.uid, o.password,
-		model, "search", filter.FilterList(filters...),
+		model, "search", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
 		return id, err
@@ -188,10 +188,10 @@ func (o *OdooJSON) GetID(model string, filters ...any) (id int, err error) {
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooJSON) Search(model string, filters ...any) (ids []int, err error) {
+func (o *OdooJSON) Search(model string, domains ...any) (ids []int, err error) {
 	v, err := o.Call("object", "execute",
 		o.database, o.uid, o.password,
-		model, "search", filter.FilterList(filters...),
+		model, "search", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
 		return ids, err
@@ -216,7 +216,7 @@ func (o *OdooJSON) Search(model string, filters ...any) (ids []int, err error) {
 func (o *OdooJSON) Read(model string, ids []int, fields ...string) (records []map[string]any, err error) {
 	v, err := o.Call("object", "execute",
 		o.database, o.uid, o.password,
-		model, "read", ids, filter.FilterString(fields...),
+		model, "read", ids, odoosearchdomain.DomainString(fields...),
 	)
 	if err != nil {
 		return records, err
@@ -236,16 +236,16 @@ func (o *OdooJSON) Read(model string, ids []int, fields ...string) (records []ma
 // offset: number of records to skip
 // limit: maximum number of records to return
 // fields: list of field names
-// filters: list of search criteria following the modified odoo domain syntax
+// domains: list of search criteria following the modified odoo domain syntax
 // Example:
 // offset = 0
 // limit = 1
 // fields = ["name", "email"]
-// filters = [["name", "=", "ZExample1"]]
-func (o *OdooJSON) SearchRead(model string, offset int, limit int, fields []string, filters ...any) (records []map[string]any, err error) {
+// domains = [["name", "=", "ZExample1"]]
+func (o *OdooJSON) SearchRead(model string, offset int, limit int, fields []string, domains ...any) (records []map[string]any, err error) {
 	vv, err := o.Call("object", "execute",
 		o.database, o.uid, o.password,
-		model, "search_read", filter.FilterList(filters...), fields, offset, limit,
+		model, "search_read", odoosearchdomain.DomainList(domains...), fields, offset, limit,
 	)
 	if err != nil {
 		return records, err
