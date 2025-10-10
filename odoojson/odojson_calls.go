@@ -160,6 +160,9 @@ func (o *OdooJSON) GetID(model string, filters ...any) (id int, err error) {
 			ids = append(ids, int(s.Index(i).Interface().(float64)))
 		}
 	}
+	if len(ids) == 0 {
+		return -1, nil
+	}
 
 	return int(ids[0]), nil
 }
