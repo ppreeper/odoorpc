@@ -146,8 +146,6 @@ func (o *OdooJSON) GetID(model string, filters ...any) (id int, err error) {
 	var ids []int
 	data, err := o.Call(model, "search", map[string]any{
 		"domain": odoosearchdomain.DomainList(filters...),
-		"limit":  0,
-		"offset": 0,
 		"order":  "id asc",
 	})
 	if err != nil {
@@ -176,8 +174,6 @@ func (o *OdooJSON) GetID(model string, filters ...any) (id int, err error) {
 func (o *OdooJSON) Search(model string, filters ...any) (ids []int, err error) {
 	data, err := o.Call(model, "search", map[string]any{
 		"domain": odoosearchdomain.DomainList(filters...),
-		"limit":  1,
-		"offset": 0,
 		"order":  "id asc",
 	})
 
