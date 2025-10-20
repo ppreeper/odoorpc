@@ -307,3 +307,17 @@ func (o *OdooJSON) Execute(model string, method string, args []any) (result bool
 func (o *OdooJSON) ExecuteKw(model string, method string, args []any, kwargs []map[string]any) (result bool, err error) {
 	return result, nil
 }
+
+// Action
+// stub for Action
+func (o *OdooJSON) Action(model string, action string, params map[string]any) (result bool, err error) {
+	res, err := o.Call(model, action, params)
+	if err != nil {
+		return false, fmt.Errorf("action failed: %w", err)
+	}
+	if reflect.TypeOf(res).Kind() == reflect.Bool {
+		result = res.(bool)
+	}
+
+	return result, err
+}
