@@ -305,14 +305,11 @@ func (o *OdooJSON) Execute(model string, method string, args []any) (result bool
 	if reflect.TypeOf(args[0]).Kind() != reflect.Map {
 		return false, fmt.Errorf("action failed: first argument must be a map")
 	}
-	res, err := o.Call(model, method, args[0].(map[string]any))
+	_, err = o.Call(model, method, args[0].(map[string]any))
 	if err != nil {
 		return false, fmt.Errorf("action failed: %w", err)
 	}
-	if reflect.TypeOf(res).Kind() == reflect.Bool {
-		result = res.(bool)
-	}
-	return result, err
+	return true, err
 }
 
 // ExecuteKw
