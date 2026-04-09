@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-var faultRx = regexp.MustCompile(`<fault>(\s|\S)+</fault>`)
+var faultRx = regexp.MustCompile(`<fault>[\s\S]+</fault>`)
 
 // FaultError is returned from the server when an invalid call is made
 type FaultError struct {

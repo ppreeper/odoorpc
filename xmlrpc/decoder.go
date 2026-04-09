@@ -24,8 +24,8 @@ var (
 	// charset into UTF-8.
 	CharsetReader func(string, io.Reader) (io.Reader, error)
 
-	timeLayouts     = []string{iso8601, iso8601Z, iso8601Hyphen, iso8601HyphenZ}
-	invalidXmlError = errors.New("invalid xml")
+	timeLayouts   = []string{iso8601, iso8601Z, iso8601Hyphen, iso8601HyphenZ}
+	errInvalidXML = errors.New("invalid xml")
 )
 
 type TypeMismatchError string
@@ -94,7 +94,7 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			if t.Name.Local == "value" {
 				return nil
 			} else {
-				return invalidXmlError
+				return errInvalidXML
 			}
 		}
 
@@ -174,15 +174,17 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			switch t := tok.(type) {
 			case xml.StartElement:
 				if t.Name.Local != "member" {
-					return invalidXmlError
+					return errInvalidXML
 				}
 
-				tagName, fieldName, err := dec.readTag()
+				var tagName string
+				var fieldName []byte
+				tagName, fieldName, err = dec.readTag()
 				if err != nil {
 					return err
 				}
 				if tagName != "name" {
-					return invalidXmlError
+					return errInvalidXML
 				}
 
 				var fv reflect.Value
@@ -245,7 +247,7 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			case xml.StartElement:
 				var index int
 				if t.Name.Local != "data" {
-					return invalidXmlError
+					return errInvalidXML
 				}
 			DataLoop:
 				for {
@@ -256,19 +258,34 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 					switch tt := tok.(type) {
 					case xml.StartElement:
 						if tt.Name.Local != "value" {
-							return invalidXmlError
+							return errInvalidXML
 						}
 
 						if index < slice.Len() {
 							v := slice.Index(index)
+							// For slices of interfaces (e.g. []any), unwrap to the
+							// concrete value if one is present; if nil, fall through
+							// to the grow-and-append path so decodeValue can
+							// allocate the right concrete type.
 							if v.Kind() == reflect.Interface {
-								v = v.Elem()
-							}
-							if v.Kind() != reflect.Ptr {
-								return errors.New("error: cannot write to non-pointer array element")
-							}
-							if err = dec.decodeValue(v); err != nil {
-								return err
+								if v.IsNil() {
+									// Decode into a fresh value and store it.
+									elem := reflect.New(slice.Type().Elem())
+									if err = dec.decodeValue(elem); err != nil {
+										return err
+									}
+									v.Set(elem.Elem())
+								} else {
+									inner := v.Elem()
+									if err = dec.decodeValue(inner); err != nil {
+										return err
+									}
+								}
+							} else {
+								// Concrete element (e.g. string, int64): pass directly.
+								if err = dec.decodeValue(v); err != nil {
+									return err
+								}
 							}
 						} else {
 							v := reflect.New(slice.Type().Elem())
@@ -305,13 +322,14 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 		case xml.CharData:
 			data = []byte(t.Copy())
 		default:
-			return invalidXmlError
+			return errInvalidXML
 		}
 
 		switch typeName {
 		case "int", "i4", "i8":
 			if checkType(val, reflect.Interface) == nil && val.IsNil() {
-				i, err := strconv.ParseInt(string(data), 10, 64)
+				var i int64
+				i, err = strconv.ParseInt(string(data), 10, 64)
 				if err != nil {
 					return err
 				}
@@ -322,7 +340,8 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			} else if err = checkType(val, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64); err != nil {
 				return err
 			} else {
-				i, err := strconv.ParseInt(string(data), 10, val.Type().Bits())
+				var i int64
+				i, err = strconv.ParseInt(string(data), 10, val.Type().Bits())
 				if err != nil {
 					return err
 				}
@@ -342,7 +361,6 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			}
 		case "dateTime.iso8601":
 			var t time.Time
-			var err error
 
 			for _, layout := range timeLayouts {
 				t, err = time.Parse(layout, string(data))
@@ -364,7 +382,8 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 				val.Set(reflect.ValueOf(t))
 			}
 		case "boolean":
-			v, err := strconv.ParseBool(string(data))
+			var v bool
+			v, err = strconv.ParseBool(string(data))
 			if err != nil {
 				return err
 			}
@@ -380,7 +399,8 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			}
 		case "double":
 			if checkType(val, reflect.Interface) == nil && val.IsNil() {
-				i, err := strconv.ParseFloat(string(data), 64)
+				var i float64
+				i, err = strconv.ParseFloat(string(data), 64)
 				if err != nil {
 					return err
 				}
@@ -391,7 +411,8 @@ func (dec *decoder) decodeValue(val reflect.Value) error {
 			} else if err = checkType(val, reflect.Float32, reflect.Float64); err != nil {
 				return err
 			} else {
-				i, err := strconv.ParseFloat(string(data), val.Type().Bits())
+				var i float64
+				i, err = strconv.ParseFloat(string(data), val.Type().Bits())
 				if err != nil {
 					return err
 				}
@@ -446,7 +467,7 @@ func (dec *decoder) readCharData() ([]byte, error) {
 	if t, ok := tok.(xml.CharData); ok {
 		return []byte(t.Copy()), nil
 	} else {
-		return nil, invalidXmlError
+		return nil, errInvalidXML
 	}
 }
 

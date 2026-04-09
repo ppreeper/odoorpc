@@ -2,11 +2,13 @@ package xmlrpc
 
 import (
 	"bytes"
+	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 )
 
-func NewRequest(url string, method string, args interface{}) (*http.Request, error) {
+func NewRequest(ctx context.Context, url string, method string, args interface{}) (*http.Request, error) {
 	var t []interface{}
 	var ok bool
 	if t, ok = args.([]interface{}); !ok {
@@ -20,13 +22,12 @@ func NewRequest(url string, method string, args interface{}) (*http.Request, err
 		return nil, err
 	}
 
-	request, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 
 	request.Header.Set("Content-Type", "text/xml")
-	request.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 
 	return request, nil
 }
@@ -34,7 +35,11 @@ func NewRequest(url string, method string, args interface{}) (*http.Request, err
 func EncodeMethodCall(method string, args ...interface{}) ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	b.WriteString(fmt.Sprintf("<methodCall><methodName>%s</methodName>", method))
+	b.WriteString("<methodCall><methodName>")
+	if err := xml.EscapeText(&b, []byte(method)); err != nil {
+		return nil, fmt.Errorf("EncodeMethodCall: invalid method name: %w", err)
+	}
+	b.WriteString("</methodName>")
 
 	if args != nil {
 		b.WriteString("<params>")

@@ -1,9 +1,10 @@
 package xmlrpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/rpc"
@@ -11,8 +12,17 @@ import (
 	"sync"
 )
 
+// maxResponseBytes is the maximum number of bytes read from an XML-RPC response
+// body. It prevents a misbehaving or malicious server from exhausting memory.
+const maxResponseBytes = 32 << 20 // 32 MiB
+
+// Client wraps rpc.Client with context-aware call support.
+// callMu serialises concurrent CallContext invocations so that the shared
+// codec context field is never overwritten by a racing goroutine.
 type Client struct {
 	*rpc.Client
+	codec  *clientCodec
+	callMu sync.Mutex
 }
 
 // clientCodec is rpc.ClientCodec interface implementation.
@@ -33,15 +43,19 @@ type clientCodec struct {
 
 	response Response
 
-	// ready presents channel, that is used to link request and it`s response.
+	// ctx is the context for the current in-flight request. Access is
+	// serialised by Client.callMu — no additional locking is needed here.
+	ctx context.Context
+
+	// ready presents channel, that is used to link request and its response.
 	ready chan uint64
 
 	// close notifies codec is closed.
-	close chan uint64
+	close chan struct{}
 }
 
 func (codec *clientCodec) WriteRequest(request *rpc.Request, args interface{}) (err error) {
-	httpRequest, err := NewRequest(codec.url.String(), request.ServiceMethod, args)
+	httpRequest, err := NewRequest(codec.ctx, codec.url.String(), request.ServiceMethod, args)
 	if err != nil {
 		return err
 	}
@@ -92,7 +106,7 @@ func (codec *clientCodec) ReadResponseHeader(response *rpc.Response) (err error)
 		return nil
 	}
 
-	body, err := ioutil.ReadAll(httpResponse.Body)
+	body, err := io.ReadAll(io.LimitReader(httpResponse.Body, maxResponseBytes))
 	if err != nil {
 		response.Error = err.Error()
 		return nil
@@ -126,6 +140,26 @@ func (codec *clientCodec) Close() error {
 	return nil
 }
 
+// Call invokes the named function, waits for it to complete, and returns its
+// error status. It is context-aware: cancellation and deadlines are propagated
+// to the underlying HTTP request.
+func (c *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	return c.CallContext(context.Background(), serviceMethod, args, reply)
+}
+
+// CallContext is like Call but honours the supplied context for cancellation
+// and deadline propagation into the underlying HTTP request.
+//
+// callMu serialises concurrent calls so that the context stored on the codec
+// is never overwritten by a racing goroutine before WriteRequest reads it.
+func (c *Client) CallContext(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	c.callMu.Lock()
+	c.codec.ctx = ctx
+	err := c.Client.Call(serviceMethod, args, reply)
+	c.callMu.Unlock()
+	return err
+}
+
 // NewClient returns instance of rpc.Client object, that is used to send request to xmlrpc service.
 func NewClient(requrl string, transport http.RoundTripper) (*Client, error) {
 	if transport == nil {
@@ -144,14 +178,15 @@ func NewClient(requrl string, transport http.RoundTripper) (*Client, error) {
 		return nil, err
 	}
 
-	codec := clientCodec{
+	codec := &clientCodec{
 		url:        u,
 		httpClient: httpClient,
-		close:      make(chan uint64),
+		close:      make(chan struct{}),
 		ready:      make(chan uint64),
 		responses:  make(map[uint64]*http.Response),
 		cookies:    jar,
+		ctx:        context.Background(),
 	}
 
-	return &Client{rpc.NewClientWithCodec(&codec)}, nil
+	return &Client{rpc.NewClientWithCodec(codec), codec, sync.Mutex{}}, nil
 }

@@ -14,8 +14,6 @@ import (
 // Base64 represents value in base64 encoding
 type Base64 string
 
-type encodeFunc func(reflect.Value) ([]byte, error)
-
 func marshal(v interface{}) ([]byte, error) {
 	if v == nil {
 		return []byte{}, nil
@@ -124,8 +122,6 @@ func encodeStruct(structVal reflect.Value) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-var sortMapKeys bool
-
 func encodeMap(val reflect.Value) ([]byte, error) {
 	t := val.Type()
 
@@ -138,10 +134,7 @@ func encodeMap(val reflect.Value) ([]byte, error) {
 	b.WriteString("<struct>")
 
 	keys := val.MapKeys()
-
-	if sortMapKeys {
-		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
-	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 
 	for i := 0; i < val.Len(); i++ {
 		key := keys[i]

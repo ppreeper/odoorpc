@@ -1,37 +1,43 @@
 package odooxmlrpc
 
 import (
+	"context"
 	"fmt"
-	"log"
+	"net/http"
 
-	"github.com/ppreeper/odoosearchdomain"
 	"github.com/ppreeper/odoorpc/xmlrpc"
+	"github.com/ppreeper/odoosearchdomain"
 )
 
 // Login
 // Login to the server and return the uid
-func (o *OdooXML) Login() (err error) {
+func (o *OdooXML) Login(ctx context.Context) (err error) {
 	if o.url == "" {
 		if err = o.genURL(); err != nil {
 			return fmt.Errorf("genURL failed in login: %w", err)
 		}
 	}
-	// rpc clients
-	o.common, err = xmlrpc.NewClient(o.url+"common", nil)
+	// rpc clients — use a transport with the configured timeout so hung
+	// servers cannot block indefinitely.
+	transport := &http.Transport{ResponseHeaderTimeout: o.timeout}
+	o.common, err = xmlrpc.NewClient(o.url+"common", transport)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to create common client: %w", err)
 	}
-	o.models, err = xmlrpc.NewClient(o.url+"object", nil)
+	o.models, err = xmlrpc.NewClient(o.url+"object", transport)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to create models client: %w", err)
 	}
 
 	// Logging in
-	if err := o.common.Call("authenticate", []any{
+	if err := o.common.CallContext(ctx, "authenticate", []any{
 		o.database, o.username, o.password,
 		map[string]any{},
 	}, &o.uid); err != nil {
 		return fmt.Errorf("login failed: %w", err)
+	}
+	if o.uid == 0 {
+		return fmt.Errorf("login failed: invalid credentials")
 	}
 	return nil
 }
@@ -46,8 +52,8 @@ func (o *OdooXML) Login() (err error) {
 //		"name": "ZExample1",
 //		"email": "zexample1@   example.com",
 //	}
-func (o *OdooXML) Create(model string, values map[string]any) (row int, err error) {
-	if err := o.models.Call("execute_kw", []any{
+func (o *OdooXML) Create(ctx context.Context, model string, values map[string]any) (row int, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "create",
 		[]any{values},
@@ -71,29 +77,36 @@ func (o *OdooXML) Create(model string, values map[string]any) (row int, err erro
 //	["ZExample1", "zexample1@example.com"],
 //	["ZExample2", "zexample1@example.com"],
 //	]
-func (o *OdooXML) Load(model string, header []string, values [][]any) (ids []int, err error) {
+func (o *OdooXML) Load(ctx context.Context, model string, header []string, values [][]any) (ids []int, err error) {
 	var results any
-	err = o.models.Call("execute", []any{
+	// Use execute_kw with the method args provided as a single positional
+	// argument (a list) containing header and values. This matches the
+	// execute_kw signature: execute_kw(db, uid, pwd, model, method, args, kwargs).
+	err = o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, "load", header, values,
+		model, "load",
+		[]any{header, values},
 	}, &results)
 	if err != nil {
-		return []int{}, fmt.Errorf("load failed: %w", err)
+		return nil, fmt.Errorf("load failed: %w", err)
 	}
 	switch restype := results.(type) {
 	case map[string]any:
-		vmap := results.(map[string]any)
-		idmap, ok := vmap["ids"].([]any)
+		idmap, ok := restype["ids"].([]any)
 		if !ok {
-			return []int{-1}, fmt.Errorf("ids not found in response: %w", err)
+			return nil, fmt.Errorf("load failed: ids not found in response")
 		}
 		for _, id := range idmap {
-			ids = append(ids, int(id.(int64)))
+			v, ok := id.(int64)
+			if !ok {
+				return nil, fmt.Errorf("load failed: unexpected id type %T in response", id)
+			}
+			ids = append(ids, int(v))
 		}
 	case int64:
 		ids = []int{int(restype)}
 	default:
-		ids = []int{-1}
+		return nil, fmt.Errorf("load failed: unexpected response type %T", results)
 	}
 	return ids, nil
 }
@@ -108,10 +121,11 @@ func (o *OdooXML) Load(model string, header []string, values [][]any) (ids []int
 //
 // domain = [[["name", "=", "ZExample1"]]]
 // limit = 1
-func (o *OdooXML) Count(model string, domains ...any) (count int, err error) {
-	if err := o.models.Call("execute", []any{
+func (o *OdooXML) Count(ctx context.Context, model string, domains ...any) (count int, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, "search_count", odoosearchdomain.DomainList(domains...),
+		model, "search_count",
+		[]any{odoosearchdomain.DomainList(domains...)},
 	}, &count); err != nil {
 		return -1, fmt.Errorf("count failed: %w", err)
 	}
@@ -124,11 +138,12 @@ func (o *OdooXML) Count(model string, domains ...any) (count int, err error) {
 // attributes: list of field attributes to return
 // Example:
 // attributes = ["string", "help", "type"]
-func (o *OdooXML) FieldsGet(model string, fields []string, fieldAttributes ...string) (recordFields map[string]any, err error) {
-	if err := o.models.Call("execute", []any{
-		o.database, o.uid, o.password, model, "fields_get",
-		fields,
-		fieldAttributes,
+func (o *OdooXML) FieldsGet(ctx context.Context, model string, fields []string, fieldAttributes ...string) (recordFields map[string]any, err error) {
+	// Call fields_get using execute_kw and pass the method args as a list.
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
+		o.database, o.uid, o.password,
+		model, "fields_get",
+		[]any{fields, odoosearchdomain.DomainString(fieldAttributes...)},
 	}, &recordFields); err != nil {
 		return nil, fmt.Errorf("fields_get failed: %w", err)
 	}
@@ -141,20 +156,20 @@ func (o *OdooXML) FieldsGet(model string, fields []string, fieldAttributes ...st
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooXML) GetID(model string, domains ...any) (id int, err error) {
+func (o *OdooXML) GetID(ctx context.Context, model string, domains ...any) (id int, err error) {
 	var ids []int
-	if err := o.models.Call("execute_kw", []any{
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search",
-		domains,
+		odoosearchdomain.DomainList(domains...),
 		map[string]any{"limit": 1},
 	}, &ids); err != nil {
 		return -1, fmt.Errorf("get_id failed: %w", err)
 	}
 	if len(ids) == 0 {
-		return -1, fmt.Errorf("get_id no record found")
+		return -1, nil
 	}
-	return int(ids[0]), nil
+	return ids[0], nil
 }
 
 // Search record
@@ -163,13 +178,13 @@ func (o *OdooXML) GetID(model string, domains ...any) (id int, err error) {
 // domain: list of search criteria following the modified odoo domain syntax
 // Example:
 // domain = [[["name", "=", "ZExample1"]]]
-func (o *OdooXML) Search(model string, domains ...any) (ids []int, err error) {
-	if err := o.models.Call("execute", []any{
+func (o *OdooXML) Search(ctx context.Context, model string, domains ...any) (ids []int, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search",
-		odoosearchdomain.DomainList(domains...),
+		[]any{odoosearchdomain.DomainList(domains...)},
 	}, &ids); err != nil {
-		return []int{}, fmt.Errorf("search failed: %w", err)
+		return nil, fmt.Errorf("search failed: %w", err)
 	}
 	return ids, nil
 }
@@ -182,10 +197,11 @@ func (o *OdooXML) Search(model string, domains ...any) (ids []int, err error) {
 // Example:
 // ids = [1, 2, 3]
 // fields = ["name", "email"]
-func (o *OdooXML) Read(model string, ids []int, fields ...string) (records []map[string]any, err error) {
-	if err := o.models.Call("execute", []any{
+func (o *OdooXML) Read(ctx context.Context, model string, ids []int, fields ...string) (records []map[string]any, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, "read", ids, odoosearchdomain.DomainString(fields...),
+		model, "read",
+		[]any{ids, odoosearchdomain.DomainString(fields...)},
 	}, &records); err != nil {
 		return records, fmt.Errorf("read failed: %w", err)
 	}
@@ -204,25 +220,19 @@ func (o *OdooXML) Read(model string, ids []int, fields ...string) (records []map
 // offset = 0
 // limit = 1
 // fields = ["name", "email"]
-func (o *OdooXML) SearchRead(model string, offset int, limit int, fields []string, domains ...any) (records []map[string]any, err error) {
-	options := make(map[string]any)
-	if offset > 0 {
-		options["offset"] = offset
-	}
-	if limit > 0 {
-		options["limit"] = limit
-	}
-	if len(fields) > 0 {
-		options["fields"] = odoosearchdomain.DomainString(fields...)
+func (o *OdooXML) SearchRead(ctx context.Context, model string, offset int, limit int, fields []string, domains ...any) (records []map[string]any, err error) {
+	options := map[string]any{
+		"offset": offset,
+		"limit":  limit,
+		"fields": odoosearchdomain.DomainString(fields...),
 	}
 
-	if err := o.models.Call("execute_kw", []any{
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search_read",
-		domains,
-		options,
+		[]any{odoosearchdomain.DomainList(domains...), options},
 	}, &records); err != nil {
-		return records, err
+		return nil, fmt.Errorf("search_read failed: %w", err)
 	}
 	return records, nil
 }
@@ -239,11 +249,11 @@ func (o *OdooXML) SearchRead(model string, offset int, limit int, fields []strin
 //		"name": "ZExample1",
 //		"email": "zexample1_1@example.com",
 //	}
-func (o *OdooXML) Write(model string, recordID int, values map[string]any) (result bool, err error) {
-	if err := o.models.Call("execute_kw", []any{
+func (o *OdooXML) Write(ctx context.Context, model string, recordID int, values map[string]any) (result bool, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "write",
-		[]any{[]int{recordID}, values},
+		[]any{[]int{recordID}, map[string]any{"vals": values}},
 	}, &result); err != nil {
 		return result, fmt.Errorf("write failed: %w", err)
 	}
@@ -256,8 +266,8 @@ func (o *OdooXML) Write(model string, recordID int, values map[string]any) (resu
 // ids: list of record ids
 // Example:
 // ids = [1, 2, 3]
-func (o *OdooXML) Unlink(model string, recordIDs []int) (result bool, err error) {
-	if err := o.models.Call("execute_kw", []any{
+func (o *OdooXML) Unlink(ctx context.Context, model string, recordIDs []int) (result bool, err error) {
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "unlink",
 		[]any{recordIDs},
@@ -275,12 +285,15 @@ func (o *OdooXML) Unlink(model string, recordIDs []int) (result bool, err error)
 // Example:
 // model = "res.partner"
 // method = "search_read"
-func (o *OdooXML) Execute(model string, method string, args []any) (result bool, err error) {
-	if err := o.models.Call("execute_kw", []any{
+func (o *OdooXML) Execute(ctx context.Context, model string, method string, args []any) (result bool, err error) {
+	// execute should call execute_kw for consistency with the XML-RPC
+	// transport's expectations. The args are provided as the single positional
+	// argument to execute_kw.
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, method, args,
+		model, method, []any{args},
 	}, &result); err != nil {
-		return result, err
+		return false, fmt.Errorf("execute failed: %w", err)
 	}
 	return result, nil
 }
@@ -294,12 +307,18 @@ func (o *OdooXML) Execute(model string, method string, args []any) (result bool,
 // Example:
 // model = "res.partner"
 // method = "search_read"
-func (o *OdooXML) ExecuteKw(model string, method string, args []any, kwargs []map[string]any) (result bool, err error) {
-	if err := o.models.Call("execute_kw", []any{
+func (o *OdooXML) ExecuteKw(ctx context.Context, model string, method string, args []any, kwargs []map[string]any) (result bool, err error) {
+	var kw any
+	if len(kwargs) > 0 && kwargs[0] != nil {
+		kw = kwargs[0]
+	} else {
+		kw = map[string]any{}
+	}
+	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, method, args, kwargs,
+		model, method, args, kw,
 	}, &result); err != nil {
-		return result, err
+		return false, fmt.Errorf("execute_kw failed: %w", err)
 	}
 	return result, nil
 }
