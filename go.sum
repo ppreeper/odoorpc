@@ -1,2 +1,6 @@
 github.com/ppreeper/odoosearchdomain v0.0.0-20250715231625-a26eaa13d4c2 h1:LE7dEjmIw2xXYbyc/gbCGD4ZnSOn7MC9PHxtSBZyS9A=
 github.com/ppreeper/odoosearchdomain v0.0.0-20250715231625-a26eaa13d4c2/go.mod h1:xPiAaoBcc6dYKfBh5UE3VVCMxqaLAF/JOrf94bYZ/7M=
+github.com/ppreeper/odoosearchdomain v0.0.0-20260413220110-6c458f430e8a h1:PHxUlLkDO+p6yF9j0bKzWA39Y9vMSujAKoiTPEEXecw=
+github.com/ppreeper/odoosearchdomain v0.0.0-20260413220110-6c458f430e8a/go.mod h1:xPiAaoBcc6dYKfBh5UE3VVCMxqaLAF/JOrf94bYZ/7M=
+github.com/ppreeper/odoosearchdomain v0.0.0-20261028043239-c9154ef86b19 h1:NJATcqLA3Is+BrVQFZtjkSTjteqcjI66sGjZBPdXft4=
+github.com/ppreeper/odoosearchdomain v0.0.0-20261028043239-c9154ef86b19/go.mod h1:xPiAaoBcc6dYKfBh5UE3VVCMxqaLAF/JOrf94bYZ/7M=

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,7 +122,7 @@ func TestCallSuccess(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `[1,2,3]`)
+		_, _ = fmt.Fprint(w, `[1,2,3]`)
 	}))
 	defer ts.Close()
 
@@ -144,7 +145,7 @@ func TestCallHTTPError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, `{"arguments":["record not found"]}`)
+		_, _ = fmt.Fprint(w, `{"arguments":["record not found"]}`)
 	}))
 	defer ts.Close()
 
@@ -165,7 +166,7 @@ func TestCallHTTPErrorWithoutArguments(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{}`)
+		_, _ = fmt.Fprint(w, `{}`)
 	}))
 	defer ts.Close()
 
@@ -184,7 +185,7 @@ func TestCallRequestHeadersSet(t *testing.T) {
 		gotDB = r.Header.Get("X-Odoo-Database")
 		gotCT = r.Header.Get("Content-Type")
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -205,7 +206,7 @@ func TestCallInvalidJSONResponse(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `not json at all`)
+		_, _ = fmt.Fprint(w, `not json at all`)
 	}))
 	defer ts.Close()
 
@@ -220,7 +221,7 @@ func TestCallGenURLCalledWhenEmpty(t *testing.T) {
 	t.Parallel()
 	// url is empty but config is valid → genURL should be called lazily.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -275,7 +276,7 @@ func TestLoginMissingAPIKey(t *testing.T) {
 func TestCreate(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[42]`)
+		_, _ = fmt.Fprint(w, `[42]`)
 	}))
 	defer ts.Close()
 
@@ -293,7 +294,7 @@ func TestCreateServerError(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"arguments":["bad values"]}`)
+		_, _ = fmt.Fprint(w, `{"arguments":["bad values"]}`)
 	}))
 	defer ts.Close()
 
@@ -307,7 +308,7 @@ func TestCreateServerError(t *testing.T) {
 func TestCount(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `7`)
+		_, _ = fmt.Fprint(w, `7`)
 	}))
 	defer ts.Close()
 
@@ -321,10 +322,39 @@ func TestCount(t *testing.T) {
 	}
 }
 
+func TestCountOmitsZeroLimit(t *testing.T) {
+	t.Parallel()
+	var body string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = fmt.Fprint(w, `7`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	if _, err := o.Count(context.Background(), "res.partner"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	// Odoo 20 raises IndexError for search_count(limit=0); the key must be
+	// omitted so the server counts without a limit.
+	if _, ok := payload["limit"]; ok {
+		t.Errorf("count payload must not contain a limit key, got: %s", body)
+	}
+	if _, ok := payload["domain"]; !ok {
+		t.Errorf("count payload missing domain, got: %s", body)
+	}
+}
+
 func TestSearch(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[1,2,3]`)
+		_, _ = fmt.Fprint(w, `[1,2,3]`)
 	}))
 	defer ts.Close()
 
@@ -341,7 +371,7 @@ func TestSearch(t *testing.T) {
 func TestSearchEmptyResult(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[]`)
+		_, _ = fmt.Fprint(w, `[]`)
 	}))
 	defer ts.Close()
 
@@ -358,7 +388,7 @@ func TestSearchEmptyResult(t *testing.T) {
 func TestGetID(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[10]`)
+		_, _ = fmt.Fprint(w, `[10]`)
 	}))
 	defer ts.Close()
 
@@ -375,7 +405,7 @@ func TestGetID(t *testing.T) {
 func TestGetIDNotFound(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[]`)
+		_, _ = fmt.Fprint(w, `[]`)
 	}))
 	defer ts.Close()
 
@@ -392,7 +422,7 @@ func TestGetIDNotFound(t *testing.T) {
 func TestRead(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]`)
+		_, _ = fmt.Fprint(w, `[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]`)
 	}))
 	defer ts.Close()
 
@@ -412,7 +442,7 @@ func TestRead(t *testing.T) {
 func TestSearchRead(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `[{"id":5,"name":"Charlie"}]`)
+		_, _ = fmt.Fprint(w, `[{"id":5,"name":"Charlie"}]`)
 	}))
 	defer ts.Close()
 
@@ -432,7 +462,7 @@ func TestSearchRead(t *testing.T) {
 func TestWrite(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -449,7 +479,7 @@ func TestWrite(t *testing.T) {
 func TestUnlink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -463,12 +493,12 @@ func TestUnlink(t *testing.T) {
 	}
 }
 
-func TestExecuteNilArgsSendsEmptyList(t *testing.T) {
+func TestExecuteNilArgsSendsEmptyPayload(t *testing.T) {
 	t.Parallel()
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -480,52 +510,19 @@ func TestExecuteNilArgsSendsEmptyList(t *testing.T) {
 	if !ok {
 		t.Error("expected true, got false")
 	}
-	args, present := gotBody["args"]
-	if !present {
-		t.Fatal("payload missing 'args' key")
-	}
-	arr, ok := args.([]any)
-	if !ok {
-		t.Fatalf("args: expected []any, got %T", args)
-	}
-	if len(arr) != 0 {
-		t.Errorf("args: expected empty list, got %v", arr)
+	// JSON API v2 has no positional argument list: the payload must not
+	// contain an "args" key, which the server would treat as a keyword.
+	if _, present := gotBody["args"]; present {
+		t.Errorf("payload must not contain 'args', got %v", gotBody)
 	}
 }
 
-func TestExecuteArgsForwardedInPayload(t *testing.T) {
+func TestExecuteKwNilKwargsSendsEmptyPayload(t *testing.T) {
 	t.Parallel()
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `true`)
-	}))
-	defer ts.Close()
-
-	o := newTestClient(ts)
-	ok, err := o.Execute(context.Background(), "res.partner", "action_archive", []any{1, 2, 3})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ok {
-		t.Error("expected true, got false")
-	}
-	args, present := gotBody["args"]
-	if !present {
-		t.Fatal("payload missing 'args' key")
-	}
-	arr, ok := args.([]any)
-	if !ok || len(arr) != 3 {
-		t.Errorf("args: expected [1 2 3], got %v", args)
-	}
-}
-
-func TestExecuteKwNilKwargsSendsArgsOnly(t *testing.T) {
-	t.Parallel()
-	var gotBody map[string]any
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -537,8 +534,8 @@ func TestExecuteKwNilKwargsSendsArgsOnly(t *testing.T) {
 	if !ok {
 		t.Error("expected true, got false")
 	}
-	if _, present := gotBody["args"]; !present {
-		t.Fatal("payload missing 'args' key")
+	if _, present := gotBody["args"]; present {
+		t.Errorf("payload must not contain 'args', got %v", gotBody)
 	}
 }
 
@@ -547,13 +544,13 @@ func TestExecuteKwMergesKwargsIntoPayload(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
 	o := newTestClient(ts)
 	ok, err := o.ExecuteKw(context.Background(), "res.partner", "method",
-		[]any{1, 2},
+		nil,
 		[]map[string]any{{"context": map[string]any{"lang": "en_US"}}},
 	)
 	if err != nil {
@@ -562,8 +559,8 @@ func TestExecuteKwMergesKwargsIntoPayload(t *testing.T) {
 	if !ok {
 		t.Error("expected true, got false")
 	}
-	if _, present := gotBody["args"]; !present {
-		t.Error("payload missing 'args' key")
+	if _, present := gotBody["args"]; present {
+		t.Errorf("payload must not contain 'args', got %v", gotBody)
 	}
 	if _, present := gotBody["context"]; !present {
 		t.Error("payload missing 'context' key merged from kwargs")
@@ -573,7 +570,7 @@ func TestExecuteKwMergesKwargsIntoPayload(t *testing.T) {
 func TestFieldsGet(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"name":{"type":"char","string":"Name"}}`)
+		_, _ = fmt.Fprint(w, `{"name":{"type":"char","string":"Name"}}`)
 	}))
 	defer ts.Close()
 
@@ -592,7 +589,7 @@ func TestFieldsGetNoAttributesOmitsKey(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `{}`)
+		_, _ = fmt.Fprint(w, `{}`)
 	}))
 	defer ts.Close()
 
@@ -608,7 +605,7 @@ func TestFieldsGetWithAttributesSendsKey(t *testing.T) {
 	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody) //nolint
-		fmt.Fprint(w, `{}`)
+		_, _ = fmt.Fprint(w, `{}`)
 	}))
 	defer ts.Close()
 
@@ -630,7 +627,7 @@ func TestLoad(t *testing.T) {
 		// Verify the payload has both fields and data keys.
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body) //nolint
-		fmt.Fprint(w, `{"ids":[10,11]}`)
+		_, _ = fmt.Fprint(w, `{"ids":[10,11]}`)
 	}))
 	defer ts.Close()
 
@@ -650,7 +647,7 @@ func TestLoad(t *testing.T) {
 func TestAction(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `true`)
+		_, _ = fmt.Fprint(w, `true`)
 	}))
 	defer ts.Close()
 
@@ -661,5 +658,145 @@ func TestAction(t *testing.T) {
 	}
 	if !ok {
 		t.Error("expected true")
+	}
+}
+
+func TestCreateEmptyIDsReturnsError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	_, err := o.Create(context.Background(), "res.partner", map[string]any{"name": "Test"})
+	if err == nil {
+		t.Fatal("expected error for empty ids response, got nil")
+	}
+}
+
+func TestWriteUnexpectedResponseReturnsError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"unexpected": true}`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	_, err := o.Write(context.Background(), "res.partner", 1, map[string]any{"name": "Updated"})
+	if err == nil {
+		t.Fatal("expected error for non-boolean write response, got nil")
+	}
+}
+
+func TestUnlinkUnexpectedResponseReturnsError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"unexpected": true}`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	_, err := o.Unlink(context.Background(), "res.partner", []int{1, 2})
+	if err == nil {
+		t.Fatal("expected error for non-boolean unlink response, got nil")
+	}
+}
+
+func TestExecuteKwUnexpectedResponseReturnsError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"unexpected": true}`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	_, err := o.ExecuteKw(context.Background(), "res.partner", "write", []any{1}, nil)
+	if err == nil {
+		t.Fatal("expected error for non-boolean execute_kw response, got nil")
+	}
+}
+
+func TestGetIDUnexpectedResponseReturnsError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"unexpected": true}`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	if _, err := o.GetID(context.Background(), "res.partner"); err == nil {
+		t.Fatal("expected error for non-list search response, got nil")
+	}
+}
+
+// TestExecuteRejectsPositionalArgs pins the JSON API v2 limitation: the
+// endpoint has no positional argument list, so Execute must fail clearly
+// instead of sending an "args" key the server does not understand.
+func TestExecuteRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	called := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = fmt.Fprint(w, `true`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	if _, err := o.Execute(context.Background(), "res.partner", "exists", []any{1}); err == nil {
+		t.Fatal("expected an error for positional arguments")
+	}
+	if called {
+		t.Error("server must not be called when positional arguments are rejected")
+	}
+}
+
+func TestExecuteKwRejectsPositionalArgs(t *testing.T) {
+	t.Parallel()
+	called := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = fmt.Fprint(w, `true`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	if _, err := o.ExecuteKw(context.Background(), "res.users", "has_group", []any{"base.group_user"}, nil); err == nil {
+		t.Fatal("expected an error for positional arguments")
+	}
+	if called {
+		t.Error("server must not be called when positional arguments are rejected")
+	}
+}
+
+func TestExecuteKwSendsKwargs(t *testing.T) {
+	t.Parallel()
+	var body string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = fmt.Fprint(w, `true`)
+	}))
+	defer ts.Close()
+
+	o := newTestClient(ts)
+	ok, err := o.ExecuteKw(context.Background(), "res.users", "has_group",
+		nil, []map[string]any{{"group_ext_id": "base.group_user"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected true")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	if _, ok := payload["args"]; ok {
+		t.Errorf("payload must not contain args, got: %s", body)
+	}
+	if payload["group_ext_id"] != "base.group_user" {
+		t.Errorf("kwargs not sent as payload keys, got: %s", body)
 	}
 }

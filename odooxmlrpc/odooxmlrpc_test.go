@@ -82,7 +82,7 @@ func newXMLTestServer(t *testing.T, body string) (*httptest.Server, *OdooXML) {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/xml")
-		fmt.Fprint(w, body)
+		_, _ = fmt.Fprint(w, body)
 	}))
 	o := &OdooXML{
 		schema:   "http",
@@ -167,7 +167,7 @@ func newQueueServer(t *testing.T, responses []string) (ts *httptest.Server, requ
 			return
 		}
 		w.Header().Set("Content-Type", "text/xml")
-		fmt.Fprint(w, responses[i])
+		_, _ = fmt.Fprint(w, responses[i])
 	}))
 	return ts, requestBodies
 }
@@ -269,12 +269,109 @@ func TestWriteSendsCorrectStructure(t *testing.T) {
 	}
 	body := (*reqBodies)[0]
 
-	// The call must NOT wrap ids and vals together in a single extra array.
-	// Verify the request XML is parseable and contains "vals" as a named member.
+	// The call must send the canonical write([ids], values) payload: the
+	// record id wrapped in an array, and the values as direct struct
+	// members — not behind a "vals" wrapper member.
 	if _, err := xml.NewDecoder(strings.NewReader(body)).Token(); err != nil {
-		t.Errorf("request body is not valid XML: %v", err)
+		t.Fatalf("request body is not valid XML: %v", err)
 	}
-	if !strings.Contains(body, "vals") {
-		t.Errorf("expected 'vals' keyword in request body, got:\n%s", body)
+	if !strings.Contains(body, "<int>42</int>") {
+		t.Errorf("expected record id 42 in request body, got:\n%s", body)
+	}
+	if !strings.Contains(body, "<name>name</name>") {
+		t.Errorf("expected 'name' values member in request body, got:\n%s", body)
+	}
+	if strings.Contains(body, "<name>vals</name>") {
+		t.Errorf("values must not be wrapped in a 'vals' member, got:\n%s", body)
+	}
+}
+
+// TestExecuteSendsArgsAsPositionalList pins the execute_kw layout for Execute:
+// db, uid, password, model, method, args, {} — the caller's args list is not
+// wrapped in an extra list, which previously shifted every argument by one.
+func TestExecuteSendsArgsAsPositionalList(t *testing.T) {
+	t.Parallel()
+	ts, reqBodies := newQueueServer(t, []string{xmlrpcResponse("<boolean>1</boolean>")})
+	defer ts.Close()
+
+	o := newXMLCRUDClient(t, ts)
+	ok, err := o.Execute(context.Background(), "res.users", "has_group", []any{[]any{2}, "base.group_user"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Error("expected true, got false")
+	}
+
+	body := (*reqBodies)[0]
+	if n := strings.Count(body, "<param>"); n != 7 {
+		t.Errorf("got %d params, want 7:\n%s", n, body)
+	}
+	if !strings.Contains(body, "<value><array><data><value><array><data><value><int>2</int></value></data></array></value><value><string>base.group_user</string></value></data></array></value>") {
+		t.Errorf("args list must be forwarded as one array value, got:\n%s", body)
+	}
+	if !strings.Contains(body, "<value><struct></struct></value>") {
+		t.Errorf("expected empty kwargs struct, got:\n%s", body)
+	}
+}
+
+// TestGetIDSendsDomainAsSingleArgument pins the execute_kw argument layout for
+// search: the domain must be the single positional argument. Passing the domain
+// elements directly made Odoo treat "login" as the domain and raise
+// "string index out of range".
+func TestGetIDSendsDomainAsSingleArgument(t *testing.T) {
+	t.Parallel()
+	ts, reqBodies := newQueueServer(t, []string{
+		xmlrpcResponse("<array><data><value><int>2</int></value></data></array>"),
+	})
+	defer ts.Close()
+
+	o := newXMLCRUDClient(t, ts)
+	id, err := o.GetID(context.Background(), "res.users", []any{"login", "=", "admin"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 2 {
+		t.Errorf("got id %d, want 2", id)
+	}
+
+	body := (*reqBodies)[0]
+	// The domain must be wrapped in an array (the args array) whose first
+	// element is the tuple: <array><data><array><data><string>login</string>...
+	if !strings.Contains(body, "<value><array><data><value><array><data><value><string>login</string>") {
+		t.Errorf("domain must be nested as a single argument, got:\n%s", body)
+	}
+	if !strings.Contains(body, "<name>limit</name>") {
+		t.Errorf("expected limit kwarg in request body, got:\n%s", body)
+	}
+}
+
+// TestSearchReadSendsOptionsAsKwargs pins search_read's calling convention:
+// the domain is positional and fields/offset/limit are keyword arguments.
+// Passing the options map positionally made Odoo read it as `fields` and fail
+// with "Invalid field 'fields' on model 'res.users'".
+func TestSearchReadSendsOptionsAsKwargs(t *testing.T) {
+	t.Parallel()
+	ts, reqBodies := newQueueServer(t, []string{
+		xmlrpcResponse("<array><data></data></array>"),
+	})
+	defer ts.Close()
+
+	o := newXMLCRUDClient(t, ts)
+	if _, err := o.SearchRead(context.Background(), "res.users", 0, 3, []string{"login", "name"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := (*reqBodies)[0]
+	// execute_kw takes seven parameters: db, uid, password, model, method,
+	// args, kwargs.
+	if got := strings.Count(body, "<param>"); got != 7 {
+		t.Fatalf("got %d execute_kw parameters, want 7 (args and kwargs separate), body:\n%s", got, body)
+	}
+	lastParam := body[strings.LastIndex(body, "<param>"):]
+	for _, name := range []string{"offset", "limit", "fields"} {
+		if !strings.Contains(lastParam, "<name>"+name+"</name>") {
+			t.Errorf("expected %q in the kwargs struct, got:\n%s", name, lastParam)
+		}
 	}
 }

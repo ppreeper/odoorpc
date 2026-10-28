@@ -1,6 +1,10 @@
 package xmlrpc
 
 import (
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +110,54 @@ func TestEncodeStruct(t *testing.T) {
 	}
 }
 
+// assertWellFormedXML fails the test if b cannot be tokenised as XML.
+// Unescaped '&' or '<' in <name> elements surfaces here as a parse error.
+func assertWellFormedXML(t *testing.T, b []byte) {
+	t.Helper()
+	dec := xml.NewDecoder(bytes.NewReader(b))
+	for {
+		_, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("output is not well-formed XML: %v\n%s", err, b)
+		}
+	}
+}
+
+func TestEncodeStructEscapesMemberName(t *testing.T) {
+	t.Parallel()
+
+	type sample struct {
+		Value string `xmlrpc:"a<b&c"`
+	}
+
+	b, err := marshal(sample{Value: "x"})
+	if err != nil {
+		t.Fatalf("marshal struct unexpected error: %v", err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "<name>a&lt;b&amp;c</name>") {
+		t.Errorf("member name not escaped: %s", got)
+	}
+	assertWellFormedXML(t, b)
+}
+
+func TestEncodeMapKeyEscaped(t *testing.T) {
+	t.Parallel()
+
+	b, err := marshal(map[string]any{"a&b": 1})
+	if err != nil {
+		t.Fatalf("marshal map unexpected error: %v", err)
+	}
+	got := string(b)
+	if !strings.Contains(got, "<name>a&amp;b</name>") {
+		t.Errorf("map key not escaped: %s", got)
+	}
+	assertWellFormedXML(t, b)
+}
+
 func TestEncodeStructOmitempty(t *testing.T) {
 	t.Parallel()
 
@@ -143,7 +195,7 @@ func TestEncodeMapKeysSorted(t *testing.T) {
 	if aPos < 0 || mPos < 0 || zPos < 0 {
 		t.Fatalf("missing expected keys in output: %s", got)
 	}
-	if !(aPos < mPos && mPos < zPos) {
+	if aPos >= mPos || mPos >= zPos {
 		t.Errorf("map keys not sorted alphabetically: a=%d m=%d z=%d in %s", aPos, mPos, zPos, got)
 	}
 }

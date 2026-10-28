@@ -41,7 +41,7 @@ func (o *OdooJSON) Login(ctx context.Context) (err error) {
 //
 //	values = {
 //		"name": "ZExample1",
-//		"email": "zexample1@   example.com",
+//		"email": "zexample1@example.com",
 //	}
 func (o *OdooJSON) Create(ctx context.Context, model string, values map[string]any) (row int, err error) {
 	v, err := o.Call(ctx, "object", "execute",
@@ -49,15 +49,13 @@ func (o *OdooJSON) Create(ctx context.Context, model string, values map[string]a
 		model, "create", values,
 	)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("create failed: %w", err)
 	}
-	switch v := v.(type) {
-	case float64:
-		row = int(v)
-	default:
-		row = -1
+	f, ok := v.(float64)
+	if !ok {
+		return -1, fmt.Errorf("create failed: unexpected response type %T", v)
 	}
-	return row, nil
+	return int(f), nil
 }
 
 // Load
@@ -80,7 +78,7 @@ func (o *OdooJSON) Load(ctx context.Context, model string, header []string, valu
 		model, "load", header, values,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load failed: %w", err)
 	}
 	switch restype := results.(type) {
 	case map[string]any:
@@ -119,7 +117,7 @@ func (o *OdooJSON) Count(ctx context.Context, model string, domains ...any) (cou
 		model, "search_count", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
-		return count, err
+		return -1, fmt.Errorf("count failed: %w", err)
 	}
 	switch v := v.(type) {
 	case float64:
@@ -175,10 +173,13 @@ func (o *OdooJSON) GetID(ctx context.Context, model string, domains ...any) (id 
 		model, "search", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("get_id failed: %w", err)
 	}
 	items, ok := v.([]any)
-	if !ok || len(items) == 0 {
+	if !ok {
+		return -1, fmt.Errorf("get_id failed: unexpected response type %T", v)
+	}
+	if len(items) == 0 {
 		return -1, nil
 	}
 	f, ok := items[0].(float64)
@@ -200,7 +201,7 @@ func (o *OdooJSON) Search(ctx context.Context, model string, domains ...any) (id
 		model, "search", odoosearchdomain.DomainList(domains...),
 	)
 	if err != nil {
-		return ids, err
+		return nil, fmt.Errorf("search failed: %w", err)
 	}
 	switch v := v.(type) {
 	case []any:
@@ -235,7 +236,7 @@ func (o *OdooJSON) Read(ctx context.Context, model string, ids []int, fields ...
 		model, "read", ids, odoosearchdomain.DomainString(fields...),
 	)
 	if err != nil {
-		return records, err
+		return nil, fmt.Errorf("read failed: %w", err)
 	}
 	switch v := v.(type) {
 	case []any:
@@ -272,7 +273,7 @@ func (o *OdooJSON) SearchRead(ctx context.Context, model string, offset int, lim
 		model, "search_read", odoosearchdomain.DomainList(domains...), fields, offset, limit,
 	)
 	if err != nil {
-		return records, err
+		return nil, fmt.Errorf("search_read failed: %w", err)
 	}
 
 	switch vv := vv.(type) {
@@ -305,18 +306,18 @@ func (o *OdooJSON) SearchRead(ctx context.Context, model string, offset int, lim
 //		"email": "zexample1_1@example.com",
 //	}
 func (o *OdooJSON) Write(ctx context.Context, model string, recordID int, values map[string]any) (result bool, err error) {
+	// write is invoked old-style as write([id], values): the record id
+	// must be passed as a list, not a bare integer.
 	v, err := o.Call(ctx, "object", "execute",
 		o.database, o.uid, o.password,
-		model, "write", recordID, values,
+		model, "write", []int{recordID}, values,
 	)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("write failed: %w", err)
 	}
-	switch v := v.(type) {
-	case bool:
-		result = v
-	default:
-		result = false
+	result, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("write failed: unexpected response type %T", v)
 	}
 	return result, nil
 }
@@ -333,13 +334,11 @@ func (o *OdooJSON) Unlink(ctx context.Context, model string, recordIDs []int) (r
 		model, "unlink", recordIDs,
 	)
 	if err != nil {
-		return result, err
+		return false, fmt.Errorf("unlink failed: %w", err)
 	}
-	switch v := v.(type) {
-	case bool:
-		result = v
-	default:
-		result = false
+	result, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("unlink failed: unexpected response type %T", v)
 	}
 	return result, nil
 }
@@ -353,18 +352,22 @@ func (o *OdooJSON) Unlink(ctx context.Context, model string, recordIDs []int) (r
 // model = "res.partner"
 // method = "search_read"
 func (o *OdooJSON) Execute(ctx context.Context, model string, method string, args []any) (result bool, err error) {
+	// execute_kw expects the positional args list followed by a kwargs map.
+	// A nil args slice would be marshalled as JSON null, which Odoo rejects
+	// ("Value after * must be an iterable"), so send an empty list instead.
+	if args == nil {
+		args = []any{}
+	}
 	v, err := o.Call(ctx, "object", "execute_kw",
 		o.database, o.uid, o.password,
-		model, method, args,
+		model, method, args, map[string]any{},
 	)
 	if err != nil {
-		return result, err
+		return false, fmt.Errorf("execute failed: %w", err)
 	}
-	switch v := v.(type) {
-	case bool:
-		result = v
-	default:
-		result = false
+	result, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("execute failed: unexpected response type %T", v)
 	}
 	return result, nil
 }
@@ -383,7 +386,11 @@ func (o *OdooJSON) ExecuteKw(ctx context.Context, model string, method string, a
 	// two separate positional parameters: the list of positional args followed
 	// by the kwargs map. When our caller provides a []map[string]any for
 	// kwargs we forward the first map if present, otherwise pass an empty
-	// map to match Odoo's expectations.
+	// map to match Odoo's expectations. A nil args slice would be marshalled
+	// as JSON null, so send an empty list instead.
+	if args == nil {
+		args = []any{}
+	}
 	var kw any
 	if len(kwargs) > 0 && kwargs[0] != nil {
 		kw = kwargs[0]
@@ -395,13 +402,11 @@ func (o *OdooJSON) ExecuteKw(ctx context.Context, model string, method string, a
 		model, method, args, kw,
 	)
 	if err != nil {
-		return result, err
+		return false, fmt.Errorf("execute_kw failed: %w", err)
 	}
-	switch v := v.(type) {
-	case bool:
-		result = v
-	default:
-		result = false
+	result, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("execute_kw failed: unexpected response type %T", v)
 	}
 	return result, nil
 }

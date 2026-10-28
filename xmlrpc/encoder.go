@@ -27,7 +27,7 @@ func encodeValue(val reflect.Value) ([]byte, error) {
 	var b []byte
 	var err error
 
-	if val.Kind() == reflect.Ptr || val.Kind() == reflect.Interface {
+	if val.Kind() == reflect.Pointer || val.Kind() == reflect.Interface {
 		if val.IsNil() {
 			return []byte("<value/>"), nil
 		}
@@ -62,14 +62,12 @@ func encodeValue(val reflect.Value) ([]byte, error) {
 			b = []byte("<boolean>0</boolean>")
 		}
 	case reflect.String:
-		var buf bytes.Buffer
-
-		xml.Escape(&buf, []byte(val.String()))
+		escaped := escapeXMLString(val.String())
 
 		if _, ok := val.Interface().(Base64); ok {
-			b = []byte(fmt.Sprintf("<base64>%s</base64>", buf.String()))
+			b = []byte(fmt.Sprintf("<base64>%s</base64>", escaped))
 		} else {
-			b = []byte(fmt.Sprintf("<string>%s</string>", buf.String()))
+			b = []byte(fmt.Sprintf("<string>%s</string>", escaped))
 		}
 	default:
 		return nil, fmt.Errorf("xmlrpc encode error: unsupported type")
@@ -80,6 +78,16 @@ func encodeValue(val reflect.Value) ([]byte, error) {
 	}
 
 	return []byte(fmt.Sprintf("<value>%s</value>", string(b))), nil
+}
+
+// escapeXMLString escapes s for use as XML character data. It is used for
+// string values and for struct member names / map keys interpolated into
+// <name> elements; unescaped names containing &, < or > produce malformed
+// XML that servers reject.
+func escapeXMLString(s string) string {
+	var b bytes.Buffer
+	xml.Escape(&b, []byte(s))
+	return b.String()
 }
 
 func encodeStruct(structVal reflect.Value) ([]byte, error) {
@@ -112,7 +120,7 @@ func encodeStruct(structVal reflect.Value) ([]byte, error) {
 		}
 
 		b.WriteString("<member>")
-		b.WriteString(fmt.Sprintf("<name>%s</name>", name))
+		fmt.Fprintf(&b, "<name>%s</name>", escapeXMLString(name))
 		b.Write(p)
 		b.WriteString("</member>")
 	}
@@ -141,7 +149,7 @@ func encodeMap(val reflect.Value) ([]byte, error) {
 		kval := val.MapIndex(key)
 
 		b.WriteString("<member>")
-		b.WriteString(fmt.Sprintf("<name>%s</name>", key.String()))
+		fmt.Fprintf(&b, "<name>%s</name>", escapeXMLString(key.String()))
 
 		p, err := encodeValue(kval)
 		if err != nil {
