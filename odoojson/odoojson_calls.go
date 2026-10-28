@@ -2,6 +2,7 @@ package odoojson
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ppreeper/odoosearchdomain"
@@ -36,15 +37,16 @@ func (o *OdooJSON) Create(ctx context.Context, model string, values map[string]a
 
 	switch v := rowID.(type) {
 	case []any:
-		if len(v) >= 1 {
-			id, ok := v[0].(float64)
-			if !ok {
-				return -1, fmt.Errorf("create failed: unexpected id type in response")
-			}
-			row = int(id)
+		if len(v) == 0 {
+			return -1, fmt.Errorf("create failed: no ids in response")
 		}
+		id, ok := v[0].(float64)
+		if !ok {
+			return -1, fmt.Errorf("create failed: unexpected id type in response")
+		}
+		row = int(id)
 	default:
-		return -1, fmt.Errorf("create failed: unexpected response type")
+		return -1, fmt.Errorf("create failed: unexpected response type %T", rowID)
 	}
 
 	return row, nil
@@ -102,9 +104,11 @@ func (o *OdooJSON) Load(ctx context.Context, model string, header []string, valu
 // filters = [[["name", "=", "ZExample1"]]]
 // limit = 1
 func (o *OdooJSON) Count(ctx context.Context, model string, filters ...any) (count int, err error) {
+	// Do not send "limit": 0. Odoo 20's search_count treats an explicit zero
+	// limit as an empty result set and raises IndexError internally, so the
+	// key is omitted entirely to count without a limit.
 	searchCount, err := o.Call(ctx, model, "search_count", map[string]any{
 		"domain": odoosearchdomain.DomainList(filters...),
-		"limit":  0,
 	})
 	if err != nil {
 		return -1, fmt.Errorf("count failed: %w", err)
@@ -113,7 +117,7 @@ func (o *OdooJSON) Count(ctx context.Context, model string, filters ...any) (cou
 	case float64:
 		count = int(v)
 	default:
-		return -1, fmt.Errorf("count failed: unexpected response type")
+		return -1, fmt.Errorf("count failed: unexpected response type %T", searchCount)
 	}
 	return count, nil
 }
@@ -157,7 +161,10 @@ func (o *OdooJSON) GetID(ctx context.Context, model string, filters ...any) (id 
 	}
 
 	ids, ok := data.([]any)
-	if !ok || len(ids) == 0 {
+	if !ok {
+		return -1, fmt.Errorf("get_id failed: unexpected response type %T", data)
+	}
+	if len(ids) == 0 {
 		return -1, nil
 	}
 	v, ok := ids[0].(float64)
@@ -182,7 +189,10 @@ func (o *OdooJSON) GetIDWithOrder(ctx context.Context, model string, order strin
 	}
 
 	ids, ok := data.([]any)
-	if !ok || len(ids) == 0 {
+	if !ok {
+		return -1, fmt.Errorf("get_id failed: unexpected response type %T", data)
+	}
+	if len(ids) == 0 {
 		return -1, nil
 	}
 	v, ok := ids[0].(float64)
@@ -368,7 +378,10 @@ func (o *OdooJSON) Write(ctx context.Context, model string, recordID int, values
 	if err != nil {
 		return false, fmt.Errorf("write failed: %w", err)
 	}
-	result, _ = res.(bool)
+	result, ok := res.(bool)
+	if !ok {
+		return false, fmt.Errorf("write failed: unexpected response type %T", res)
+	}
 	return result, nil
 }
 
@@ -385,32 +398,40 @@ func (o *OdooJSON) Unlink(ctx context.Context, model string, recordIDs []int) (r
 	if err != nil {
 		return false, fmt.Errorf("unlink failed: %w", err)
 	}
-	result, _ = res.(bool)
+	result, ok := res.(bool)
+	if !ok {
+		return false, fmt.Errorf("unlink failed: unexpected response type %T", res)
+	}
 	return result, nil
 }
 
-// Execute calls the given method on model, passing args as a positional argument
-// list in the JSON API v2 payload. A nil or empty args slice sends an empty list.
+// errJSON2PositionalArgs explains why Execute cannot forward positional
+// arguments. The JSON API v2 endpoint has no argument list: every payload key
+// becomes a keyword argument of the model method, so positional arguments
+// cannot be expressed.
+var errJSON2PositionalArgs = errors.New("positional arguments are not supported by the JSON API v2")
+
+// Execute calls the given method on model. JSON API v2 has no positional
+// argument list, so args must be empty; method arguments must be supplied
+// through ExecuteKw instead.
 func (o *OdooJSON) Execute(ctx context.Context, model string, method string, args []any) (result bool, err error) {
-	if args == nil {
-		args = []any{}
+	if len(args) > 0 {
+		return false, fmt.Errorf("execute failed: %w", errJSON2PositionalArgs)
 	}
-	payload := map[string]any{"args": args}
-	_, err = o.Call(ctx, model, method, payload)
-	if err != nil {
+	if _, err := o.Call(ctx, model, method, map[string]any{}); err != nil {
 		return false, fmt.Errorf("execute failed: %w", err)
 	}
 	return true, nil
 }
 
-// ExecuteKw calls the given method on model, merging args and all keys from the
-// first kwargs map into the JSON API v2 payload. A nil kwargs slice is valid and
-// results in a payload that contains only the "args" key.
+// ExecuteKw calls the given method on model with keyword arguments. JSON API
+// v2 has no positional argument list, so args must be empty; every key of the
+// first kwargs map is sent as a keyword argument.
 func (o *OdooJSON) ExecuteKw(ctx context.Context, model string, method string, args []any, kwargs []map[string]any) (result bool, err error) {
-	if args == nil {
-		args = []any{}
+	if len(args) > 0 {
+		return false, fmt.Errorf("execute_kw failed: %w", errJSON2PositionalArgs)
 	}
-	payload := map[string]any{"args": args}
+	payload := map[string]any{}
 	if len(kwargs) > 0 {
 		for k, v := range kwargs[0] {
 			payload[k] = v
@@ -420,7 +441,10 @@ func (o *OdooJSON) ExecuteKw(ctx context.Context, model string, method string, a
 	if err != nil {
 		return false, fmt.Errorf("execute_kw failed: %w", err)
 	}
-	result, _ = res.(bool)
+	result, ok := res.(bool)
+	if !ok {
+		return false, fmt.Errorf("execute_kw failed: unexpected response type %T", res)
+	}
 	return result, nil
 }
 
@@ -431,6 +455,8 @@ func (o *OdooJSON) Action(ctx context.Context, model string, action string, para
 	if err != nil {
 		return false, fmt.Errorf("action failed: %w", err)
 	}
+	// Action payloads and responses vary by action; a non-boolean
+	// response coerces to false rather than failing the call.
 	result, _ = res.(bool)
 	return result, nil
 }

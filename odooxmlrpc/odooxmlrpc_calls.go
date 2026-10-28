@@ -50,7 +50,7 @@ func (o *OdooXML) Login(ctx context.Context) (err error) {
 //
 //	values = {
 //		"name": "ZExample1",
-//		"email": "zexample1@   example.com",
+//		"email": "zexample1@example.com",
 //	}
 func (o *OdooXML) Create(ctx context.Context, model string, values map[string]any) (row int, err error) {
 	if err := o.models.CallContext(ctx, "execute_kw", []any{
@@ -161,7 +161,7 @@ func (o *OdooXML) GetID(ctx context.Context, model string, domains ...any) (id i
 	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search",
-		odoosearchdomain.DomainList(domains...),
+		[]any{odoosearchdomain.DomainList(domains...)},
 		map[string]any{"limit": 1},
 	}, &ids); err != nil {
 		return -1, fmt.Errorf("get_id failed: %w", err)
@@ -221,16 +221,20 @@ func (o *OdooXML) Read(ctx context.Context, model string, ids []int, fields ...s
 // limit = 1
 // fields = ["name", "email"]
 func (o *OdooXML) SearchRead(ctx context.Context, model string, offset int, limit int, fields []string, domains ...any) (records []map[string]any, err error) {
+	// fields, offset and limit are keyword arguments of search_read; only the
+	// domain is positional. Passing the options map positionally made Odoo
+	// treat it as the `fields` argument ("Invalid field 'fields'").
 	options := map[string]any{
 		"offset": offset,
 		"limit":  limit,
-		"fields": odoosearchdomain.DomainString(fields...),
+		"fields": fields,
 	}
 
 	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "search_read",
-		[]any{odoosearchdomain.DomainList(domains...), options},
+		[]any{odoosearchdomain.DomainList(domains...)},
+		options,
 	}, &records); err != nil {
 		return nil, fmt.Errorf("search_read failed: %w", err)
 	}
@@ -250,10 +254,12 @@ func (o *OdooXML) SearchRead(ctx context.Context, model string, offset int, limi
 //		"email": "zexample1_1@example.com",
 //	}
 func (o *OdooXML) Write(ctx context.Context, model string, recordID int, values map[string]any) (result bool, err error) {
+	// write is invoked old-style as write([ids], values): the ids are a
+	// list and the values are passed directly, without a "vals" wrapper.
 	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
 		model, "write",
-		[]any{[]int{recordID}, map[string]any{"vals": values}},
+		[]any{[]int{recordID}, values},
 	}, &result); err != nil {
 		return result, fmt.Errorf("write failed: %w", err)
 	}
@@ -286,12 +292,13 @@ func (o *OdooXML) Unlink(ctx context.Context, model string, recordIDs []int) (re
 // model = "res.partner"
 // method = "search_read"
 func (o *OdooXML) Execute(ctx context.Context, model string, method string, args []any) (result bool, err error) {
-	// execute should call execute_kw for consistency with the XML-RPC
-	// transport's expectations. The args are provided as the single positional
-	// argument to execute_kw.
+	// execute_kw takes the positional args list followed by a kwargs map.
+	// Passing args directly (and not wrapped in another list) keeps the
+	// recordset ids in the first position for record methods and forwards
+	// model-method arguments unchanged.
 	if err := o.models.CallContext(ctx, "execute_kw", []any{
 		o.database, o.uid, o.password,
-		model, method, []any{args},
+		model, method, args, map[string]any{},
 	}, &result); err != nil {
 		return false, fmt.Errorf("execute failed: %w", err)
 	}

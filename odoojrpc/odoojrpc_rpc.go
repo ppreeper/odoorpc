@@ -61,9 +61,8 @@ func (e *rpcError) Error() string {
 func encodeClientRequest(service, method string, args any) ([]byte, error) {
 	// Use a non-cryptographic PRNG for JSON-RPC request IDs. The ID is only
 	// used for matching requests and responses and does not require
-	// cryptographic unpredictability. math/rand is fast and sufficient for
-	// this purpose; callers that need different seeding can call
-	// rand.Seed(...) if deterministic IDs are undesirable.
+	// cryptographic unpredictability; math/rand/v2 is fast, automatically
+	// seeded, and sufficient for this purpose.
 	req := &clientRequest{
 		JSONRPC: "2.0",
 		Method:  "call",
@@ -112,7 +111,7 @@ func (o *OdooJSON) Call(ctx context.Context, service string, method string, args
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if err := decodeClientResponse(io.LimitReader(resp.Body, maxResponseBytes), &res); err != nil {
 		return nil, err

@@ -99,7 +99,7 @@ func (codec *clientCodec) ReadResponseHeader(response *rpc.Response) (err error)
 	delete(codec.responses, seq)
 	codec.mutex.Unlock()
 
-	defer httpResponse.Body.Close()
+	defer func() { _ = httpResponse.Body.Close() }()
 
 	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
 		response.Error = fmt.Sprintf("request error: bad status code - %d", httpResponse.StatusCode)

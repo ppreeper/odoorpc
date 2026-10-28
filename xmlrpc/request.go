@@ -50,7 +50,7 @@ func EncodeMethodCall(method string, args ...interface{}) ([]byte, error) {
 				return nil, err
 			}
 
-			b.WriteString(fmt.Sprintf("<param>%s</param>", string(p)))
+			fmt.Fprintf(&b, "<param>%s</param>", p)
 		}
 
 		b.WriteString("</params>")

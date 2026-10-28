@@ -57,7 +57,7 @@ func (o *OdooJSON) Call(ctx context.Context, model string, method string, payloa
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Handle non-2xx responses before attempting to decode the body.
 	// Non-2xx bodies may not be JSON (e.g. HTML from a reverse proxy).
